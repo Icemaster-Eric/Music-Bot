@@ -3,7 +3,6 @@ import asyncio
 from random import shuffle
 import discord
 from discord.ext import commands
-import youtube_dl
 
 
 intents = discord.Intents.default()
@@ -23,27 +22,6 @@ song_message: discord.Message | None = None
 playlist_songs = []
 looping = False
 
-ytdl_format_options = {
-    "format": "bestaudio/best",
-    "outtmpl": "playlists/%(title)s.%(ext)s",
-    "restrictfilenames": True,
-    "noplaylist": False,
-    "nocheckcertificate": True,
-    "ignoreerrors": False,
-    "logtostderr": False,
-    "quiet": True,
-    "no_warnings": True,
-    "default_search": "auto",
-    "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-    "postprocessors": [{
-        "key": "FFmpegExtractAudio",
-        "preferredcodec": "mp3",
-        "preferredquality": "192",
-    }],
-}
-
-ytdl = youtube_dl.YoutubeDL(ytdl_format_options)
-
 
 async def play_next():
     global song_message, looping, current_song
@@ -56,6 +34,7 @@ async def play_next():
             if voice_client is not None:
                 if voice_client.is_connected():
                     await voice_client.disconnect()
+                    await bot.change_presence(activity=None)
                     playlist_songs.clear()
                     song_message = None
                     looping = False
@@ -87,38 +66,20 @@ async def play_next():
 
         for emoji in ["⏯️","⏭️","🔁","🔀","⏹️"]:
             await song_message.add_reaction(emoji)
+    
+    music_activity = discord.activity.Activity(
+        name=song_name,
+        type=discord.ActivityType.playing,
+        state=f"in {voice_client.channel.name}"
+    )
+    await bot.change_presence(activity=music_activity)
 
     source = discord.FFmpegOpusAudio(song_path)
     voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(), bot.loop))
 
 
-@bot.tree.command(name="list", description="List all available playlists")
-async def list_playlists(interaction: discord.Interaction):
-    embed = discord.Embed(title="Music Playlists", color=discord.Color.blurple())
-    embed.set_footer(text="Use /play [playlist_name] to play any music playlist in a VC")
-
-    for playlist in playlists:
-        embed.add_field(name=playlist, value="", inline=True)
-
-    await interaction.response.send_message(embed=embed, ephemeral=True)
-
-
-@bot.tree.command(name="add-playlist", description="Download a YouTube music playlist")
-async def add_playlist(interaction: discord.Interaction, link: str):
-    await interaction.response.send_message("This feature is currently disabled.", ephemeral=True)
-    return
-
-    await interaction.response.defer(ephemeral=True)
-
-    print(ytdl.params.get("user_agent"))
-
-    ytdl.download([link])
-
-    await interaction.response.send_message("Successfully downloaded the playlist.", ephemeral=True)
-
-
-@bot.tree.command(name="play", description="Play a music playlist in your VC")
-async def play(interaction: discord.Interaction, playlist_name: str):
+@bot.tree.command(name="music", description="Listen to Strinova OSTs in your VC")
+async def play(interaction: discord.Interaction):
     global voice_client, current_playlist_name, song_message
 
     # Ensure the command user is in a voice channel.
@@ -131,25 +92,21 @@ async def play(interaction: discord.Interaction, playlist_name: str):
             await interaction.response.send_message("Already playing music in a voice channel.", ephemeral=True)
             return
 
-    if playlist_name not in playlists:
-        await interaction.response.send_message(f"The playlist {playlist_name} does not exist.", ephemeral=True)
-        return
-
-    current_playlist_name = playlist_name
+    current_playlist_name = "strinova"
 
     # Defer the response since processing might take a moment.
     await interaction.response.defer()
 
-    for mp3_file in os.listdir(f"playlists/{playlist_name}"):
+    for mp3_file in os.listdir(f"playlists/strinova"):
         if mp3_file.endswith(".mp3"):
             playlist_songs.append(mp3_file)
-            await playlist.put(f"playlists/{playlist_name}/{mp3_file}")
+            await playlist.put(f"playlists/strinova/{mp3_file}")
 
     voice_client = await interaction.user.voice.channel.connect() # type: ignore
     # reset song_message
     song_message = None
 
-    await interaction.followup.send(f"🎵 Now playing from playlist: **{playlist_name}**")
+    await interaction.followup.send(f"🎵 Now playing from playlist: **Strinova**")
     await play_next()
 
 
@@ -219,7 +176,7 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
                     f"`[{i + 1}] {name.split('/')[-1][:-4].replace('_', ' ')}`" for i, name in enumerate(playlist_songs)
             ])
         )
-        embed.set_author(name=f"Music Playlist: {current_playlist_name}", icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png")
+        embed.set_author(name=f"Music Playlist: {current_playlist_name.capitalize()}", icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png")
         if looping:
             embed.set_footer(text="[Looping]")
         if song_message is not None:
@@ -229,6 +186,7 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
 
     elif reaction.emoji == "⏹️":
         await voice_client.disconnect()
+        await bot.change_presence(activity=None)
         while not playlist.empty():
             await playlist.get()
         playlist_songs.clear()
