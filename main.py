@@ -15,11 +15,9 @@ playlists = [name for name in os.listdir(playlists_path) if os.path.isdir(os.pat
 playlist = asyncio.Queue()
 current_playlist_name = ""
 current_song = ""
-current_song_path = ""
 song_message: discord.Message | None = None
 playlist_songs = []
 looping = False
-loop_track = False
 thumbnails = {
     "Audrey's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/c079c92ffafb34c2cf89f2f367d36b5d72d91c76_image.png",
     "Celestia's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/0e1e678913ae712eb13fa031c0e4436032049225_image.png",
@@ -37,12 +35,10 @@ thumbnails = {
 
 
 async def play_next():
-    global song_message, looping, current_song, current_song_path, loop_track
+    global song_message, looping, current_song
 
     if playlist.empty():
-        if loop_track:
-            await playlist.put(current_song_path)
-        elif looping:
+        if looping:
             for song in playlist_songs:
                 await playlist.put(f"playlists/{current_playlist_name}/{song}")
         else:
@@ -59,7 +55,6 @@ async def play_next():
         return
 
     song_path: str = await playlist.get()
-    current_song_path = song_path
     current_song = song_path.split("/")[-1]
     song_name = song_path.split("/")[-1][:-4].replace("_", " ")
 
@@ -81,7 +76,7 @@ async def play_next():
     else:
         song_message = await voice_client.channel.send(embed=embed)
 
-        for emoji in ["⏯️","⏮️","⏭️","🔁","🔂","🔀","⏹️"]:
+        for emoji in ["⏯️","⏮️","⏭️","🔁","🔀","⏹️"]:
             await song_message.add_reaction(emoji)
     
     music_activity = discord.activity.Activity(
@@ -91,10 +86,8 @@ async def play_next():
     )
     await bot.change_presence(activity=music_activity)
 
-    voice_client.play(
-        discord.FFmpegOpusAudio(song_path),
-        after=lambda e: asyncio.run_coroutine_threadsafe(play_next(), bot.loop)
-    )
+    source = discord.FFmpegOpusAudio(song_path)
+    voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(), bot.loop))
 
 
 @bot.tree.command(name="music", description="Listen to Strinova OSTs in your VC")
@@ -129,12 +122,16 @@ async def play(interaction: discord.Interaction):
 
 @bot.event
 async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
-    global looping, song_message, playlist_songs, loop_track
+    global looping, song_message, playlist_songs
 
     if user.bot:
         return
 
-    if user.bot or reaction.message != song_message or not voice_client:
+    message = reaction.message
+
+    if message != song_message:
+        return
+    if not voice_client:
         return
 
     if reaction.emoji == "⏯️":
@@ -144,12 +141,10 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             voice_client.resume()
 
     elif reaction.emoji == "⏭️":
-        loop_track = False
         if voice_client.is_playing():
             voice_client.stop()
     
     elif reaction.emoji == "⏮️":
-        loop_track = False
         if voice_client.is_playing() or voice_client.is_paused():
             try:
                 idx = playlist_songs.index(current_song)
@@ -163,9 +158,8 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
                 if looping:
                     prev_idx = len(playlist_songs) - 1
                 else:
-                    await reaction.remove(user)
                     return
-
+                
             while not playlist.empty():
                 await playlist.get()
             
@@ -184,26 +178,10 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
         looping = not looping
         if song_message:
             embed = song_message.embeds[0]
-            if loop_track and looping:
-                embed.set_footer(text=f"[Looping Playlist] [Looping {current_song[:-4].replace('_', ' ')}]")
-            elif loop_track:
-                embed.set_footer(text=f"[Looping {current_song[:-4].replace('_', ' ')}]")
-            elif looping:
-                embed.set_footer(text="[Looping Playlist]")
-            song_message = await song_message.edit(embed=embed)
-    
-    elif reaction.emoji == "🔂":
-        loop_track = not loop_track
-
-        if song_message:
-            embed = song_message.embeds[0]
-            embed.remove_footer()
-            if loop_track and looping:
-                embed.set_footer(text=f"[Looping Playlist] [Looping {current_song[:-4].replace('_', ' ')}]")
-            elif loop_track:
-                embed.set_footer(text=f"[Looping {current_song[:-4].replace('_', ' ')}]")
-            elif looping:
-                embed.set_footer(text="[Looping Playlist]")
+            if looping:
+                embed.set_footer(text="[Looping]")
+            else:
+                embed.remove_footer()
             song_message = await song_message.edit(embed=embed)
 
     elif reaction.emoji == "🔀":
@@ -233,12 +211,8 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
         )
         embed.set_author(name=f"Strinova OST Playlist", icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png")
         embed.set_thumbnail(url=thumbnails.get(current_song_name, thumbnails["strinova"]))
-        if loop_track and looping:
-            embed.set_footer(text=f"[Looping Playlist] [Looping {current_song[:-4].replace('_', ' ')}]")
-        elif loop_track:
-            embed.set_footer(text=f"[Looping {current_song[:-4].replace('_', ' ')}]")
-        elif looping:
-            embed.set_footer(text="[Looping Playlist]")
+        if looping:
+            embed.set_footer(text="[Looping]")
         if song_message is not None:
             song_message = await song_message.edit(embed=embed)
         else:
