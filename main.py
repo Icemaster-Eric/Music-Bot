@@ -6,9 +6,6 @@ from discord.ext import commands
 
 
 intents = discord.Intents.default()
-intents.message_content = True
-intents.voice_states = True
-intents.members = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 voice_client: None | discord.VoiceClient = None
@@ -21,6 +18,20 @@ current_song = ""
 song_message: discord.Message | None = None
 playlist_songs = []
 looping = False
+thumbnails = {
+    "Audrey's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/c079c92ffafb34c2cf89f2f367d36b5d72d91c76_image.png",
+    "Celestia's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/0e1e678913ae712eb13fa031c0e4436032049225_image.png",
+    "Eika's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/6c8b65492bcac8a7035899eed3292d670dbc0a04_image.png",
+    "Flavia's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/f69850eb4bffa08cf134ec96e8559c89dd32a925_image.png",
+    "Fuchsia's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/ae27b3844f8a61e2f65f67ae0f6b87397e639767_image.png",
+    "Kanami's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/17ba1771592c38b0b4a1c906d7447093aa1ef9da_image.png",
+    "Kokona's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/3ed7fcfb2465e17b43ada66bb594c0c679bd2274_image.png",
+    "Maddelena's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/e48995ae19d646b2cc57a0dfce7c2f5df5f44f90_image.png",
+    "Michele's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/5d21d6188daa70fc53a1edc3f0a9cf831c9a941c_image.png",
+    "Yvette's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/3ae3150ee330eb2da43323e3c7e693bb7806c515_image.png",
+    "Beautiful World": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/37ddc9aa76abaabcce0b0cd593d27483fca0bf03_image.png",
+    "strinova": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/f71ea9118a610b5d1ca0f5241727c5524ff933ae_strinova_mjwu.jpg"
+}
 
 
 async def play_next():
@@ -56,7 +67,8 @@ async def play_next():
                 f"`[{i + 1}] {name.split('/')[-1][:-4].replace('_', ' ')}`" for i, name in enumerate(playlist_songs)
         ])
     )
-    embed.set_author(name=f"Music Playlist: {current_playlist_name}", icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png")
+    embed.set_author(name=f"Music Playlist: {current_playlist_name.capitalize()}", icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png")
+    embed.set_thumbnail(url=thumbnails.get(song_name, thumbnails["strinova"]))
     if looping:
         embed.set_footer(text="[Looping]")
     if song_message is not None:
@@ -127,15 +139,12 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
     if reaction.emoji == "⏯️":
         if voice_client.is_playing():
             voice_client.pause()
-            await voice_client.channel.send("> -# Paused current track", delete_after=10)
         else:
             voice_client.resume()
-            await voice_client.channel.send("> -# Resumed current track", delete_after=10)
 
     elif reaction.emoji == "⏭️":
         if voice_client.is_playing():
             voice_client.stop()
-            await voice_client.channel.send("> -# Skipped current track", delete_after=10)
 
     elif reaction.emoji == "🔁":
         looping = not looping
@@ -146,17 +155,13 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             else:
                 embed.remove_footer()
             song_message = await song_message.edit(embed=embed)
-        if looping:
-            await voice_client.channel.send("> -# Looping current track", delete_after=10)
-        else:
-            await voice_client.channel.send("> -# Unlooping current track", delete_after=10)
 
     elif reaction.emoji == "🔀":
         shuffle(playlist_songs)
 
         while not playlist.empty():
             await playlist.get()
-        
+
         current_song_name = current_song[:-4].replace("_", " ")
 
         i = 0
@@ -177,6 +182,7 @@ async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
             ])
         )
         embed.set_author(name=f"Music Playlist: {current_playlist_name.capitalize()}", icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png")
+        embed.set_thumbnail(url=thumbnails.get(current_song_name, thumbnails["strinova"]))
         if looping:
             embed.set_footer(text="[Looping]")
         if song_message is not None:
