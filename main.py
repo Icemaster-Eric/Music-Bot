@@ -69,7 +69,7 @@ async def play_next(guild_id: int):
         name=f"{current_playlist_name[guild_id].capitalize()} Playlist",
         icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png"
     )
-    embed.set_thumbnail(url=thumbnails.get(song_name[:-4], thumbnails["strinova"]))
+    embed.set_thumbnail(url=thumbnails.get(song_name, thumbnails["strinova"]))
     if looping[guild_id]:
         embed.set_footer(text="[Looping]")
 
