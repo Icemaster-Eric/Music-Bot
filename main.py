@@ -4,20 +4,18 @@ from random import shuffle
 import discord
 from discord.ext import commands
 
-
 intents = discord.Intents.default()
-
 bot = commands.Bot(command_prefix="!", intents=intents)
-voice_client: None | discord.VoiceClient = None
 
-playlists_path = "playlists"
-playlists = [name for name in os.listdir(playlists_path) if os.path.isdir(os.path.join(playlists_path, name))]
-playlist = asyncio.Queue()
-current_playlist_name = ""
-current_song = ""
-song_message: discord.Message | None = None
-playlist_songs = []
-looping = False
+# Per-guild state containers
+voice_clients: dict[int, discord.VoiceClient] = {}
+queues: dict[int, asyncio.Queue[str]] = {}
+playlist_songs: dict[int, list[str]] = {}
+current_playlist_name: dict[int, str] = {}
+current_song: dict[int, str] = {}
+song_messages: dict[int, discord.Message] = {}
+looping: dict[int, bool] = {}
+
 thumbnails = {
     "Audrey's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/c079c92ffafb34c2cf89f2f367d36b5d72d91c76_image.png",
     "Celestia's Theme": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/0e1e678913ae712eb13fa031c0e4436032049225_image.png",
@@ -33,225 +31,204 @@ thumbnails = {
     "strinova": "https://hc-cdn.hel1.your-objectstorage.com/s/v3/f71ea9118a610b5d1ca0f5241727c5524ff933ae_strinova_mjwu.jpg"
 }
 
+async def play_next(guild_id: int):
+    vc = voice_clients.get(guild_id)
+    q = queues[guild_id]
 
-async def play_next():
-    global song_message, looping, current_song
-
-    if playlist.empty():
-        if looping:
-            for song in playlist_songs:
-                await playlist.put(f"playlists/{current_playlist_name}/{song}")
+    if q.empty():
+        if looping[guild_id]:
+            for song in playlist_songs[guild_id]:
+                await q.put(f"playlists/{current_playlist_name[guild_id]}/{song}")
         else:
-            if voice_client is not None:
-                if voice_client.is_connected():
-                    await voice_client.disconnect()
-                    await bot.change_presence(activity=None)
-                    playlist_songs.clear()
-                    song_message = None
-                    looping = False
+            if vc and vc.is_connected():
+                await vc.disconnect()
+            await bot.change_presence(activity=None)
+            playlist_songs[guild_id].clear()
+            song_messages.pop(guild_id, None)
+            looping[guild_id] = False
             return
 
-    if voice_client is None:
+    if vc is None or not vc.is_connected():
         return
 
-    song_path: str = await playlist.get()
-    current_song = song_path.split("/")[-1]
-    song_name = song_path.split("/")[-1][:-4].replace("_", " ")
+    song_path = await q.get()
+    song_file = os.path.basename(song_path)
+    current_song[guild_id] = song_file
+    song_name = song_file[:-4].replace("_", " ")
 
     embed = discord.Embed(
         color=discord.Color.blurple(),
         title=f"Now Playing: {song_name}",
-        description="\n".join([
-            f"`{i + 1} {name.split('/')[-1][:-4].replace('_', ' ')}`" \
-                if f"playlists/{current_playlist_name}/{name}" != song_path else \
-                f"`[{i + 1}] {name.split('/')[-1][:-4].replace('_', ' ')}`" for i, name in enumerate(playlist_songs)
-        ])
+        description="\n".join(
+            f"`[{i+1}] {name[:-4].replace('_',' ')}`" if name == song_file
+            else f"`{i+1} {name[:-4].replace('_',' ')}`"
+            for i, name in enumerate(playlist_songs[guild_id])
+        )
     )
-    embed.set_author(name=f"Strinova OST Playlist", icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png")
+    embed.set_author(
+        name=f"{current_playlist_name[guild_id].capitalize()} Playlist",
+        icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png"
+    )
     embed.set_thumbnail(url=thumbnails.get(song_name, thumbnails["strinova"]))
-    if looping:
+    if looping[guild_id]:
         embed.set_footer(text="[Looping]")
-    if song_message is not None:
-        song_message = await song_message.edit(embed=embed)
-    else:
-        song_message = await voice_client.channel.send(embed=embed)
 
+    msg = song_messages.get(guild_id)
+    if msg:
+        song_messages[guild_id] = await msg.edit(embed=embed)
+    else:
+        channel = vc.channel
+        song_messages[guild_id] = await channel.send(embed=embed)
         for emoji in ["⏯️","⏮️","⏭️","🔁","🔀","⏹️"]:
-            await song_message.add_reaction(emoji)
-    
-    music_activity = discord.activity.Activity(
+            await song_messages[guild_id].add_reaction(emoji)
+
+    activity = discord.Activity(
         name=song_name,
         type=discord.ActivityType.playing,
-        state=f"in {voice_client.channel.name}"
+        state=f"in {vc.channel.name}"
     )
-    await bot.change_presence(activity=music_activity)
+    await bot.change_presence(activity=activity)
 
     source = discord.FFmpegOpusAudio(song_path)
-    voice_client.play(source, after=lambda e: asyncio.run_coroutine_threadsafe(play_next(), bot.loop))
+    vc.play(
+        source,
+        after=lambda e: asyncio.run_coroutine_threadsafe(play_next(guild_id), bot.loop)
+    )
 
+@bot.tree.command(name="music", description="Listen to an OST playlist in your VC")
+async def music(interaction: discord.Interaction):
+    guild_id = interaction.guild_id
 
-@bot.tree.command(name="music", description="Listen to Strinova OSTs in your VC")
-async def play(interaction: discord.Interaction):
-    global voice_client, current_playlist_name, song_message
-
-    if interaction.user.voice is None: # type: ignore
-        await interaction.response.send_message("You must join a voice channel to play music.", ephemeral=True)
+    if not interaction.user.voice: # type: ignore
+        await interaction.response.send_message(
+            "You must join a voice channel first.", ephemeral=True
+        )
         return
 
-    if voice_client is not None:
-        if voice_client.is_playing():
-            await interaction.response.send_message("Already playing music in a voice channel.", ephemeral=True)
-            return
+    queues[guild_id] = queues.get(guild_id, asyncio.Queue()) # type: ignore
+    playlist_songs[guild_id] = [] # type: ignore
+    looping[guild_id] = False # type: ignore
+    current_playlist_name[guild_id] = "strinova" # type: ignore
 
-    current_playlist_name = "strinova"
+    base = f"playlists/strinova"
+    for fn in os.listdir(base):
+        if fn.endswith(".mp3"):
+            playlist_songs[guild_id].append(fn) # type: ignore
+            await queues[guild_id].put(f"{base}/{fn}") # type: ignore
 
     await interaction.response.defer()
+    vc = await interaction.user.voice.channel.connect() # type: ignore
+    voice_clients[guild_id] = vc # type: ignore
 
-    for mp3_file in os.listdir(f"playlists/strinova"):
-        if mp3_file.endswith(".mp3"):
-            playlist_songs.append(mp3_file)
-            await playlist.put(f"playlists/strinova/{mp3_file}")
-
-    voice_client = await interaction.user.voice.channel.connect() # type: ignore
-
-    song_message = None
-
-    await interaction.followup.send(f"🎵 Now playing from playlist: **Strinova**")
-    await play_next()
-
+    await interaction.followup.send(f"🎵 Now playing in **{vc.channel.name}**")
+    await play_next(guild_id) # type: ignore
 
 @bot.event
 async def on_reaction_add(reaction: discord.Reaction, user: discord.User):
-    global looping, song_message, playlist_songs
-
     if user.bot:
         return
-
-    message = reaction.message
-
-    if message != song_message:
-        return
-    if not voice_client:
+    msg = reaction.message
+    guild_id = msg.guild.id if msg.guild else None
+    if guild_id not in song_messages or msg.id != song_messages[guild_id].id:
         return
 
-    if reaction.emoji == "⏯️":
-        if voice_client.is_playing():
-            voice_client.pause()
+    vc = voice_clients.get(guild_id)
+    q = queues[guild_id]
+
+    emoji = reaction.emoji
+
+    if emoji == "⏯️" and vc:
+        if vc.is_playing(): vc.pause()
+        else: vc.resume()
+
+    elif emoji == "⏭️" and vc and vc.is_playing():
+        vc.stop()
+
+    elif emoji == "⏮️" and vc:
+        # find index
+        cur = current_song[guild_id]
+        lst = playlist_songs[guild_id]
+        try:
+            idx = lst.index(cur)
+        except ValueError:
+            await reaction.remove(user)
+            return
+
+        if idx > 0:
+            prev = idx - 1
+        elif looping[guild_id]:
+            prev = len(lst) - 1
         else:
-            voice_client.resume()
+            await reaction.remove(user)
+            return
 
-    elif reaction.emoji == "⏭️":
-        if voice_client.is_playing():
-            voice_client.stop()
-    
-    elif reaction.emoji == "⏮️":
-        if voice_client.is_playing() or voice_client.is_paused():
-            try:
-                idx = playlist_songs.index(current_song)
-            except ValueError:
-                await reaction.remove(user)
-                return
-            
-            if idx > 0:
-                prev_idx = idx - 1
-            else:
-                if looping:
-                    prev_idx = len(playlist_songs) - 1
-                else:
-                    return
-                
-            while not playlist.empty():
-                await playlist.get()
-            
-            new_order = playlist_songs[prev_idx:]
+        while not q.empty(): await q.get()
+        order = lst[prev:] + (lst[:prev] if looping[guild_id] else [])
+        for s in order:
+            await q.put(f"playlists/{current_playlist_name[guild_id]}/{s}")
+        vc.stop()
 
-            if looping:
-                new_order += playlist_songs[:prev_idx]
-            
-            for song_file in new_order:
-                path = f"playlists/{current_playlist_name}/{song_file}"
-                await playlist.put(path)
+    elif emoji == "🔁":
+        looping[guild_id] = not looping[guild_id]
+        embed = msg.embeds[0]
+        if looping[guild_id]:
+            embed.set_footer(text="[Looping]")
+        else:
+            embed.remove_footer()
+        song_messages[guild_id] = await msg.edit(embed=embed)
 
-            voice_client.stop()
-
-    elif reaction.emoji == "🔁":
-        looping = not looping
-        if song_message:
-            embed = song_message.embeds[0]
-            if looping:
-                embed.set_footer(text="[Looping]")
-            else:
-                embed.remove_footer()
-            song_message = await song_message.edit(embed=embed)
-
-    elif reaction.emoji == "🔀":
-        shuffle(playlist_songs)
-
-        while not playlist.empty():
-            await playlist.get()
-
-        current_song_name = current_song[:-4].replace("_", " ")
-
-        i = 0
-        for i, song_name in enumerate(playlist_songs):
-            if song_name == current_song:
-                break
-
-        for next_song in playlist_songs[i+1:]:
-            await playlist.put(f"playlists/{current_playlist_name}/{next_song}")
-
+    elif emoji == "🔀":
+        lst = playlist_songs[guild_id]
+        shuffle(lst)
+        while not q.empty(): await q.get()
+        cur = current_song[guild_id]
+        i = lst.index(cur)
+        for s in lst[i+1:]:
+            await q.put(f"playlists/{current_playlist_name[guild_id]}/{s}")
         embed = discord.Embed(
             color=discord.Color.blurple(),
-            title=f"Now Playing: {current_song_name}",
-            description="\n".join([
-                f"`{i + 1} {name.split('/')[-1][:-4].replace('_', ' ')}`" \
-                    if name != current_song else \
-                    f"`[{i + 1}] {name.split('/')[-1][:-4].replace('_', ' ')}`" for i, name in enumerate(playlist_songs)
-            ])
+            title=f"Now Playing: {cur[:-4]}",
+            description="\n".join(
+                f"`[{i+1}] {name[:-4].replace('_',' ')}`" if name == cur
+                else f"`{i+1} {name[:-4].replace('_',' ')}`"
+                for i, name in enumerate(lst)
+            )
         )
-        embed.set_author(name=f"Strinova OST Playlist", icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png")
-        embed.set_thumbnail(url=thumbnails.get(current_song_name, thumbnails["strinova"]))
-        if looping:
+        embed.set_author(
+            name=f"{current_playlist_name[guild_id].capitalize()} Playlist",
+            icon_url="https://cdn-icons-png.flaticon.com/128/9325/9325026.png"
+        )
+        embed.set_thumbnail(url=thumbnails.get(cur, thumbnails["strinova"]))
+        if looping[guild_id]:
             embed.set_footer(text="[Looping]")
-        if song_message is not None:
-            song_message = await song_message.edit(embed=embed)
-        else:
-            song_message = await voice_client.channel.send(embed=embed)
+        song_messages[guild_id] = await msg.edit(embed=embed)
 
-    elif reaction.emoji == "⏹️":
-        await voice_client.disconnect()
+    elif emoji == "⏹️" and vc:
+        await vc.disconnect()
         await bot.change_presence(activity=None)
-        while not playlist.empty():
-            await playlist.get()
-        playlist_songs.clear()
-        song_message = None
-        looping = False
+        queues[guild_id] = asyncio.Queue()
+        playlist_songs[guild_id].clear()
+        song_messages.pop(guild_id, None)
+        looping[guild_id] = False
 
     await reaction.remove(user)
 
-
 @bot.event
 async def on_voice_state_update(member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-    global song_message, looping
-
-    if member.bot:
-        return
-
-    if before.channel is not None:
-        if voice_client is not None:
-            if len([m for m in voice_client.channel.members if not m.bot]) == 0:
-                await voice_client.disconnect()
-                while not playlist.empty():
-                    await playlist.get()
-                playlist_songs.clear()
-                song_message = None
-                looping = False
-
+    guild_id = member.guild.id
+    vc = voice_clients.get(guild_id)
+    if vc and before.channel == vc.channel:
+        non_bots = [m for m in vc.channel.members if not m.bot]
+        if not non_bots:
+            await vc.disconnect()
+            queues[guild_id] = asyncio.Queue()
+            playlist_songs[guild_id].clear()
+            song_messages.pop(guild_id, None)
+            looping[guild_id] = False
 
 @bot.event
 async def on_ready():
     await bot.tree.sync()
     print(f"Logged in as {bot.user}")
-
 
 bot.run(os.environ["DISCORD_BOT_TOKEN"])
