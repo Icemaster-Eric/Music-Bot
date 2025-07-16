@@ -1,4 +1,4 @@
-from mutagen.id3 import ID3, APIC
+from mutagen.id3 import ID3, APIC # type: ignore
 from PIL import Image
 import numpy as np
 
@@ -9,7 +9,7 @@ def extract_album_art(mp3_path, output_image_path="cover.jpg"):
     for tag in audio.values():
         if isinstance(tag, APIC):
             with open(output_image_path, 'wb') as img:
-                img.write(tag.data)
+                img.write(tag.data) # type: ignore
             print(f"Album art saved to: {output_image_path}")
             return output_image_path
 
