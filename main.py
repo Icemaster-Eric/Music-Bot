@@ -105,6 +105,13 @@ async def music(interaction: discord.Interaction):
         )
         return
 
+    elif voice_clients.get(guild_id) != None: # type: ignore
+        if voice_clients.get(guild_id).is_connected(): # type: ignore
+            await interaction.response.send_message(
+                "Already playing in a voice channel.", ephemeral=True
+            )
+            return
+
     queues[guild_id] = queues.get(guild_id, asyncio.Queue()) # type: ignore
     playlist_songs[guild_id] = [] # type: ignore
     looping[guild_id] = False # type: ignore
