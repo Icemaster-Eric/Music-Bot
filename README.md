@@ -10,5 +10,6 @@ The bot is very easy to use, featuring ergonomic commands, and only does what it
 
 1. Clone the repository and cd into the folder
 2. Run `pip install -r requirements.txt`
-3. Create a `.env` file with `DISCORD_BOT_TOKEN="your bot token"`
-4. Run `main.py`
+3. Ensure `ffmpeg` is installed - for Windows, you can download from the official website or use Chocolatey. For macOS, you can use Homebrew. For Linux, you can use `sudo apt install ffmpeg`. Verify that `ffmpeg` is available on your system by running `ffmpeg -version`.
+4. Create a `.env` file with `DISCORD_BOT_TOKEN="your bot token"`
+5. Run `main.py`
