@@ -5,3 +5,10 @@ The bot is very easy to use, featuring ergonomic commands, and only does what it
 - Use `/music` and the bot will join the voice channel you are currently in, starting the Strinova playlist and sending a message in your voice channel.
 - The list of OSTs and the currently playing track are clearly shown in the message's embed, which is updated after each track.
 - The message includes fast and responsive reaction controls for play/pause, skipping, shuffling, looping, and ending the playlist.
+
+## Development Setup
+
+1. Clone the repository and cd into the folder
+2. Run `pip install -r requirements.txt`
+3. Create a `.env` file with `DISCORD_BOT_TOKEN="your bot token"`
+4. Run `main.py`
